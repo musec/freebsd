@@ -316,6 +316,10 @@ struct nd_pfxrouter {
 
 LIST_HEAD(nd_prhead, nd_prefix);
 
+#ifdef MALLOC_DECLARE
+MALLOC_DECLARE(M_IP6NDP);
+#endif
+
 /* nd6.c */
 VNET_DECLARE(int, nd6_prune);
 VNET_DECLARE(int, nd6_delay);
@@ -354,9 +358,6 @@ VNET_DECLARE(struct rwlock, nd6_lock);
 #define	ND6_UNLOCK_ASSERT()		rw_assert(&V_nd6_lock, RA_UNLOCKED)
 
 #define nd6log(x)	do { if (V_nd6_debug) log x; } while (/*CONSTCOND*/ 0)
-
-VNET_DECLARE(struct callout, nd6_timer_ch);
-#define	V_nd6_timer_ch			VNET(nd6_timer_ch)
 
 /* nd6_rtr.c */
 VNET_DECLARE(int, nd6_defifindex);
@@ -459,7 +460,7 @@ void defrouter_reset(void);
 void defrouter_select(void);
 void defrouter_ref(struct nd_defrouter *);
 void defrouter_rele(struct nd_defrouter *);
-void defrouter_remove(struct nd_defrouter *);
+bool defrouter_remove(struct in6_addr *, struct ifnet *);
 void defrouter_unlink(struct nd_defrouter *, struct nd_drhead *);
 void defrouter_del(struct nd_defrouter *);
 void prelist_remove(struct nd_prefix *);

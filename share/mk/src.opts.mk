@@ -187,7 +187,9 @@ __DEFAULT_NO_OPTIONS = \
     OPENLDAP \
     SHARED_TOOLCHAIN \
     SORT_THREADS \
-    SVN
+    SVN \
+    SYSTEM_COMPILER \
+
 
 #
 # Default behaviour of some options depends on the architecture.  Unfortunately
@@ -355,6 +357,7 @@ MK_CLANG:=	no
 MK_GCC:=	no
 MK_GDB:=	no
 MK_INCLUDES:=	no
+MK_LLDB:=	no
 .endif
 
 .if ${MK_CLANG} == "no"

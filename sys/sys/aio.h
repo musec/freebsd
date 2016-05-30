@@ -205,7 +205,8 @@ int	aio_write(struct aiocb *);
  *	"acb_list" is an array of "nacb_listent" I/O control blocks.
  *	when all I/Os are complete, the optional signal "sig" is sent.
  */
-int	lio_listio(int, struct aiocb * const [], int, struct sigevent *);
+int	lio_listio(int, struct aiocb *__restrict const *__restrict, int,
+    struct sigevent *);
 
 /*
  * Get completion status
@@ -238,7 +239,7 @@ int	aio_suspend(const struct aiocb * const[], int, const struct timespec *);
 int	aio_mlock(struct aiocb *);
 
 #ifdef __BSD_VISIBLE
-int	aio_waitcomplete(struct aiocb **, struct timespec *);
+ssize_t	aio_waitcomplete(struct aiocb **, struct timespec *);
 #endif
 
 int	aio_fsync(int op, struct aiocb *aiocbp);

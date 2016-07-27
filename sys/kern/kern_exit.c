@@ -94,7 +94,7 @@ dtrace_execexit_func_t	dtrace_fasttrap_exit;
 #endif
 
 SDT_PROVIDER_DECLARE(proc);
-SDT_PROBE_DEFINE1(proc, kernel, , exit, "int");
+SDT_PROBE_DEFINE1(proc, , , exit, "int");
 
 /* Hook for NFS teardown procedure. */
 void (*nlminfo_release_p)(struct proc *p);
@@ -189,7 +189,6 @@ exit1(struct thread *td, int rval, int signo)
 {
 	struct proc *p, *nq, *q, *t;
 	struct thread *tdt;
-	struct vnode *ttyvp = NULL;
 
 	mtx_assert(&Giant, MA_NOTOWNED);
 	KASSERT(rval == 0 || signo == 0, ("exit1 rv %d sig %d", rval, signo));
@@ -339,19 +338,23 @@ exit1(struct thread *td, int rval, int signo)
 	PROC_LOCK(p);
 	stopprofclock(p);
 	p->p_flag &= ~(P_TRACED | P_PPWAIT | P_PPTRACE);
+	p->p_ptevents = 0;
 
 	/*
 	 * Stop the real interval timer.  If the handler is currently
 	 * executing, prevent it from rearming itself and let it finish.
 	 */
 	if (timevalisset(&p->p_realtimer.it_value) &&
-	    callout_stop(&p->p_itcallout) == 0) {
+	    _callout_stop_safe(&p->p_itcallout, CS_EXECUTING, NULL) == 0) {
 		timevalclear(&p->p_realtimer.it_interval);
 		msleep(&p->p_itcallout, &p->p_mtx, PWAIT, "ritwait", 0);
 		KASSERT(!timevalisset(&p->p_realtimer.it_value),
 		    ("realtime timer is still armed"));
 	}
+
 	PROC_UNLOCK(p);
+
+	umtx_thread_exit(td);
 
 	/*
 	 * Reset any sigio structures pointing to us as a result of
@@ -394,60 +397,9 @@ exit1(struct thread *td, int rval, int signo)
 	}
 
 	vmspace_exit(td);
-
-	sx_xlock(&proctree_lock);
-	if (SESS_LEADER(p)) {
-		struct session *sp = p->p_session;
-		struct tty *tp;
-
-		/*
-		 * s_ttyp is not zero'd; we use this to indicate that
-		 * the session once had a controlling terminal. (for
-		 * logging and informational purposes)
-		 */
-		SESS_LOCK(sp);
-		ttyvp = sp->s_ttyvp;
-		tp = sp->s_ttyp;
-		sp->s_ttyvp = NULL;
-		sp->s_ttydp = NULL;
-		sp->s_leader = NULL;
-		SESS_UNLOCK(sp);
-
-		/*
-		 * Signal foreground pgrp and revoke access to
-		 * controlling terminal if it has not been revoked
-		 * already.
-		 *
-		 * Because the TTY may have been revoked in the mean
-		 * time and could already have a new session associated
-		 * with it, make sure we don't send a SIGHUP to a
-		 * foreground process group that does not belong to this
-		 * session.
-		 */
-
-		if (tp != NULL) {
-			tty_lock(tp);
-			if (tp->t_session == sp)
-				tty_signal_pgrp(tp, SIGHUP);
-			tty_unlock(tp);
-		}
-
-		if (ttyvp != NULL) {
-			sx_xunlock(&proctree_lock);
-			if (vn_lock(ttyvp, LK_EXCLUSIVE) == 0) {
-				VOP_REVOKE(ttyvp, REVOKEALL);
-				VOP_UNLOCK(ttyvp, 0);
-			}
-			sx_xlock(&proctree_lock);
-		}
-	}
-	fixjobc(p, p->p_pgrp, 0);
-	sx_xunlock(&proctree_lock);
+	killjobc();
 	(void)acct_process(td);
 
-	/* Release the TTY now we've unlocked everything. */
-	if (ttyvp != NULL)
-		vrele(ttyvp);
 #ifdef KTRACE
 	ktrprocexit(td);
 #endif
@@ -524,6 +476,7 @@ exit1(struct thread *td, int rval, int signo)
 			 */
 			clear_orphan(q);
 			q->p_flag &= ~(P_TRACED | P_STOPPED_TRACE);
+			q->p_ptevents = 0;
 			FOREACH_THREAD_IN_PROC(q, tdt)
 				tdt->td_dbgflags &= ~TDB_SUSPEND;
 			kern_psignal(q, SIGKILL);
@@ -561,7 +514,7 @@ exit1(struct thread *td, int rval, int signo)
 	/*
 	 * Notify interested parties of our demise.
 	 */
-	KNOTE_LOCKED(&p->p_klist, NOTE_EXIT);
+	KNOTE_LOCKED(p->p_klist, NOTE_EXIT);
 
 #ifdef KDTRACE_HOOKS
 	int reason = CLD_EXITED;
@@ -569,15 +522,8 @@ exit1(struct thread *td, int rval, int signo)
 		reason = CLD_DUMPED;
 	else if (WIFSIGNALED(signo))
 		reason = CLD_KILLED;
-	SDT_PROBE(proc, kernel, , exit, reason, 0, 0, 0, 0);
+	SDT_PROBE1(proc, , , exit, reason);
 #endif
-
-	/*
-	 * Just delete all entries in the p_klist. At this point we won't
-	 * report any more events, and there are nasty race conditions that
-	 * can beat us if we don't.
-	 */
-	knlist_clear(&p->p_klist, 1);
 
 	/*
 	 * If this is a process with a descriptor, we may not need to deliver
@@ -647,16 +593,9 @@ exit1(struct thread *td, int rval, int signo)
 	wakeup(p->p_pptr);
 	cv_broadcast(&p->p_pwait);
 	sched_exit(p->p_pptr, td);
-	umtx_thread_exit(td);
 	PROC_SLOCK(p);
 	p->p_state = PRS_ZOMBIE;
 	PROC_UNLOCK(p->p_pptr);
-
-	/*
-	 * Hopefully no one will try to deliver a signal to the process this
-	 * late in the game.
-	 */
-	knlist_destroy(&p->p_klist);
 
 	/*
 	 * Save our children's rusage information in our exit rusage.
@@ -903,6 +842,11 @@ proc_reap(struct thread *td, struct proc *p, int *status, int options)
 		procdesc_reap(p);
 	sx_xunlock(&proctree_lock);
 
+	PROC_LOCK(p);
+	knlist_detach(p->p_klist);
+	p->p_klist = NULL;
+	PROC_UNLOCK(p);
+
 	/*
 	 * Removal from allproc list and process group list paired with
 	 * PROC_LOCK which was executed during that time should guarantee
@@ -963,9 +907,7 @@ proc_reap(struct thread *td, struct proc *p, int *status, int options)
 	KASSERT(FIRST_THREAD_IN_PROC(p),
 	    ("proc_reap: no residual thread!"));
 	uma_zfree(proc_zone, p);
-	sx_xlock(&allproc_lock);
-	nprocs--;
-	sx_xunlock(&allproc_lock);
+	atomic_add_int(&nprocs, -1);
 }
 
 static int
@@ -981,6 +923,10 @@ proc_to_reap(struct thread *td, struct proc *p, idtype_t idtype, id_t id,
 
 	switch (idtype) {
 	case P_ALL:
+		if (p->p_procdesc != NULL) {
+			PROC_UNLOCK(p);
+			return (0);
+		}
 		break;
 	case P_PID:
 		if (p->p_pid != (pid_t)id) {

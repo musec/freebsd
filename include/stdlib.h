@@ -125,7 +125,7 @@ size_t	 wcstombs(char * __restrict, const wchar_t * __restrict, size_t);
  *
  * (The only other extension made by C99 in thie header is _Exit().)
  */
-#if __ISO_C_VISIBLE >= 1999
+#if __ISO_C_VISIBLE >= 1999 || defined(__cplusplus)
 #ifdef __LONG_LONG_SUPPORTED
 /* LONGLONG */
 typedef struct {
@@ -172,8 +172,7 @@ char	*realpath(const char * __restrict, char * __restrict);
 int	 rand_r(unsigned *);			/* (TSF) */
 #endif
 #if __POSIX_VISIBLE >= 200112
-int	 posix_memalign(void **, size_t, size_t) __nonnull(1) __alloc_align(2)
-	    __alloc_size(3);			/* (ADV) */
+int	 posix_memalign(void **, size_t, size_t) __nonnull(1); /* (ADV) */
 int	 setenv(const char *, const char *, int);
 int	 unsetenv(const char *);
 #endif
@@ -205,7 +204,7 @@ double	 erand48(unsigned short[3]);
 /* char	*fcvt(double, int, int * __restrict, int * __restrict); */
 /* char	*gcvt(double, int, int * __restrict, int * __restrict); */
 int	 grantpt(int);
-char	*initstate(unsigned long /* XSI requires u_int */, char *, long);
+char	*initstate(unsigned int, char *, size_t);
 long	 jrand48(unsigned short[3]);
 char	*l64a(long);
 void	 lcong48(unsigned short[7]);
@@ -228,7 +227,7 @@ int	 setkey(const char *);
 #endif
 char	*setstate(/* const */ char *);
 void	 srand48(long);
-void	 srandom(unsigned long);
+void	 srandom(unsigned int);
 int	 unlockpt(int);
 #endif /* __XSI_VISIBLE */
 

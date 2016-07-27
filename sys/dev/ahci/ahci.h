@@ -444,7 +444,7 @@ struct ahci_channel {
 	int			numtslotspd[16];/* Number of tagged slots per dev */
 	int			numhslots;	/* Number of held slots */
 	int			recoverycmd;	/* Our READ LOG active */
-	int			fatalerr;	/* Fatal error happend */
+	int			fatalerr;	/* Fatal error happened */
 	int			resetting;	/* Hard-reset in progress. */
 	int			resetpolldiv;	/* Hard-reset poll divider. */
 	int			listening;	/* SUD bit is cleared. */
@@ -465,7 +465,7 @@ struct ahci_enclosure {
 	device_t		dev;            /* Device handle */
 	struct resource		*r_memc;	/* Control register */
 	struct resource		*r_memt;	/* Transmit buffer */
-	struct resource		*r_memr;	/* Recieve buffer */
+	struct resource		*r_memr;	/* Receive buffer */
 	struct cam_sim		*sim;
 	struct cam_path		*path;
 	struct mtx		mtx;		/* state lock */
@@ -474,7 +474,7 @@ struct ahci_enclosure {
 	uint8_t			status[AHCI_MAX_PORTS][4]; /* ArrayDev statuses */
 	int			quirks;
 	int			channels;
-	int			ichannels;
+	uint32_t		ichannels;
 };
 
 /* structure describing a AHCI controller */
@@ -509,7 +509,7 @@ struct ahci_controller {
 	int			quirks;
 	int			numirqs;
 	int			channels;
-	int			ichannels;
+	uint32_t		ichannels;
 	int			ccc;		/* CCC timeout */
 	int			cccv;		/* CCC vector */
 	int			direct;		/* Direct command completion */
@@ -562,6 +562,20 @@ enum ahci_err_type {
 #define ATA_OUTSL_STRM(res, offset, addr, count) \
 	bus_write_multi_stream_4((res), (offset), (addr), (count))
 
+/*
+ * On some platforms, we must ensure proper interdevice write ordering.
+ * The AHCI interrupt status register must be updated in HW before
+ * registers in interrupt controller.
+ * Unfortunately, only way how we can do it is readback.
+ *
+ * Currently, only ARM is known to have this issue.
+ */
+#if defined(__arm__)
+#define ATA_RBL(res, offset) \
+	bus_read_4((res), (offset))
+#else
+#define ATA_RBL(res, offset)
+#endif
 
 #define AHCI_Q_NOFORCE		0x00000001
 #define AHCI_Q_NOPMP		0x00000002
@@ -583,6 +597,7 @@ enum ahci_err_type {
 #define AHCI_Q_1MSI		0x00020000
 #define AHCI_Q_FORCE_PI		0x00040000
 #define AHCI_Q_RESTORE_CAP	0x00080000
+#define AHCI_Q_NOMSIX		0x00100000
 
 #define AHCI_Q_BIT_STRING	\
 	"\020"			\
@@ -605,14 +620,15 @@ enum ahci_err_type {
 	"\021ABAR0"		\
 	"\0221MSI"              \
 	"\023FORCE_PI"          \
-	"\024RESTORE_CAP"
+	"\024RESTORE_CAP"	\
+	"\025NOMSIX"
 
 int ahci_attach(device_t dev);
 int ahci_detach(device_t dev);
 int ahci_setup_interrupt(device_t dev);
 int ahci_print_child(device_t dev, device_t child);
 struct resource *ahci_alloc_resource(device_t dev, device_t child, int type, int *rid,
-    u_long start, u_long end, u_long count, u_int flags);
+    rman_res_t start, rman_res_t end, rman_res_t count, u_int flags);
 int ahci_release_resource(device_t dev, device_t child, int type, int rid,
     struct resource *r);
 int ahci_setup_intr(device_t dev, device_t child, struct resource *irq, 

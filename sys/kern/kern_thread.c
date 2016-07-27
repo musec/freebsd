@@ -45,6 +45,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/sched.h>
 #include <sys/sleepqueue.h>
 #include <sys/selinfo.h>
+#include <sys/syscallsubr.h>
 #include <sys/sysent.h>
 #include <sys/turnstile.h>
 #include <sys/ktr.h>
@@ -210,7 +211,6 @@ thread_init(void *mem, int size, int flags)
 	td->td_turnstile = turnstile_alloc();
 	td->td_rlqe = NULL;
 	EVENTHANDLER_INVOKE(thread_init, td);
-	td->td_sched = (struct td_sched *)&td[1];
 	umtx_thread_init(td);
 	td->td_kstack = 0;
 	td->td_sel = NULL;
@@ -281,7 +281,7 @@ threadinit(void)
 
 	thread_zone = uma_zcreate("THREAD", sched_sizeof_thread(),
 	    thread_ctor, thread_dtor, thread_init, thread_fini,
-	    16 - 1, 0);
+	    16 - 1, UMA_ZONE_NOFREE);
 	tidhashtbl = hashinit(maxproc / 2, M_TIDHASH, &tidhash);
 	rw_init(&tidhash_lock, "tidhash");
 }
@@ -480,7 +480,7 @@ thread_exit(void)
 	 * architecture specific resources that
 	 * would not be on a new untouched process.
 	 */
-	cpu_thread_exit(td);	/* XXXSMP */
+	cpu_thread_exit(td);
 
 	/*
 	 * The last thread is left attached to the process
@@ -669,11 +669,6 @@ weed_inhib(int mode, struct thread *td2, struct proc *p)
 			wakeup_swapper |= sleepq_abort(td2, EINTR);
 		break;
 	case SINGLE_BOUNDARY:
-		if (TD_IS_SUSPENDED(td2) && (td2->td_flags & TDF_BOUNDARY) == 0)
-			wakeup_swapper |= thread_unsuspend_one(td2, p, false);
-		if (TD_ON_SLEEPQ(td2) && (td2->td_flags & TDF_SINTR) != 0)
-			wakeup_swapper |= sleepq_abort(td2, ERESTART);
-		break;
 	case SINGLE_NO_EXIT:
 		if (TD_IS_SUSPENDED(td2) && (td2->td_flags & TDF_BOUNDARY) == 0)
 			wakeup_swapper |= thread_unsuspend_one(td2, p, false);
@@ -912,8 +907,8 @@ thread_suspend_check(int return_instead)
 			/*
 			 * The only suspension in action is a
 			 * single-threading. Single threader need not stop.
-			 * XXX Should be safe to access unlocked
-			 * as it can only be set to be true by us.
+			 * It is safe to access p->p_singlethread unlocked
+			 * because it can only be set to our address by us.
 			 */
 			if (p->p_singlethread == td)
 				return (0);	/* Exempt from stopping. */
@@ -932,7 +927,10 @@ thread_suspend_check(int return_instead)
 		if ((td->td_flags & TDF_SBDRY) != 0) {
 			KASSERT(return_instead,
 			    ("TDF_SBDRY set for unsafe thread_suspend_check"));
-			return (0);
+			KASSERT((td->td_flags & (TDF_SEINTR | TDF_SERESTART)) !=
+			    (TDF_SEINTR | TDF_SERESTART),
+			    ("both TDF_SEINTR and TDF_SERESTART"));
+			return (TD_SBDRY_INTR(td) ? TD_SBDRY_ERRNO(td) : 0);
 		}
 
 		/*
@@ -942,7 +940,6 @@ thread_suspend_check(int return_instead)
 		 */
 		if ((p->p_flag & P_SINGLE_EXIT) && (p->p_singlethread != td)) {
 			PROC_UNLOCK(p);
-			tidhash_remove(td);
 
 			/*
 			 * Allow Linux emulation layer to do some work
@@ -950,13 +947,9 @@ thread_suspend_check(int return_instead)
 			 */
 			if (__predict_false(p->p_sysent->sv_thread_detach != NULL))
 				(p->p_sysent->sv_thread_detach)(td);
-
-			PROC_LOCK(p);
-			tdsigcleanup(td);
 			umtx_thread_exit(td);
-			PROC_SLOCK(p);
-			thread_stopped(p);
-			thread_exit();
+			kern_thr_exit(td);
+			panic("stopped thread did not exit");
 		}
 
 		PROC_SLOCK(p);

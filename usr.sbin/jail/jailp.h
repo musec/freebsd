@@ -41,7 +41,7 @@
 
 #define DF_SEEN		0x01	/* Dependency has been followed */
 #define DF_LIGHT	0x02	/* Implied dependency on jail existence only */
-#define DF_NOFAIL	0x04	/* Don't propigate failed jails */
+#define DF_NOFAIL	0x04	/* Don't propagate failed jails */
 
 #define PF_VAR		0x01	/* This is a variable, not a true parameter */
 #define PF_APPEND	0x02	/* Append to existing parameter list */
@@ -64,6 +64,7 @@
 #define JF_PERSIST	0x0100	/* Jail is temporarily persistent */
 #define JF_TIMEOUT	0x0200	/* A command (or process kill) timed out */
 #define JF_SLEEPQ	0x0400	/* Waiting on a command and/or timeout */
+#define JF_FROM_RUNQ	0x0800	/* Has already been on the run queue */
 
 #define JF_OP_MASK		(JF_START | JF_SET | JF_STOP)
 #define JF_RESTART		(JF_START | JF_STOP)
@@ -223,6 +224,7 @@ extern struct cfjail *next_jail(void);
 extern int start_state(const char *target, int docf, unsigned state,
     int running);
 extern void requeue(struct cfjail *j, struct cfjails *queue);
+extern void requeue_head(struct cfjail *j, struct cfjails *queue);
 
 extern void yyerror(const char *);
 extern int yylex(void);

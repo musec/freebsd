@@ -34,13 +34,14 @@ __FBSDID("$FreeBSD$");
 #include <sys/malloc.h>
 #include <sys/mutex.h>
 #include <sys/random.h>
+#include <sys/sdt.h>
 #include <sys/sysctl.h>
 #include <sys/systm.h>
 
 #include <machine/cpu.h>
 
 #include <crypto/rijndael/rijndael-api-fst.h>
-#include <crypto/sha2/sha2.h>
+#include <crypto/sha2/sha256.h>
 
 #include <dev/random/hash.h>
 #include <dev/random/randomdev.h>
@@ -49,6 +50,7 @@ __FBSDID("$FreeBSD$");
 #include <dev/random/yarrow.h>
 #else /* !_KERNEL */
 #include <inttypes.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -58,7 +60,7 @@ __FBSDID("$FreeBSD$");
 #include "unit_test.h"
 
 #include <crypto/rijndael/rijndael-api-fst.h>
-#include <crypto/sha2/sha2.h>
+#include <crypto/sha2/sha256.h>
 
 #include <dev/random/hash.h>
 #include <dev/random/randomdev.h>
@@ -76,6 +78,11 @@ __FBSDID("$FreeBSD$");
 CTASSERT(RANDOM_BLOCKSIZE == sizeof(uint128_t));
 CTASSERT(RANDOM_KEYSIZE == 2*RANDOM_BLOCKSIZE);
 
+/* Probes for dtrace(1) */
+SDT_PROVIDER_DECLARE(random);
+SDT_PROVIDER_DEFINE(random);
+SDT_PROBE_DEFINE3(random, yarrow, event_processor, debug, "boolean", "u_int", "struct ys_pool *");
+
 /*
  * This is the beastie that needs protecting. It contains all of the
  * state that we are excited about. Exactly one is instantiated.
@@ -89,10 +96,10 @@ static struct yarrow_state {
 	u_int ys_slowoverthresh;	/* slow pool overthreshhold reseed count */
 	struct ys_pool {
 		u_int ysp_source_bits[ENTROPYSOURCE];	/* estimated bits of entropy per source */
-		u_int ysp_thresh;	/* pool reseed threshhold */
+		u_int ysp_thresh;	/* pool reseed threshold */
 		struct randomdev_hash ysp_hash;	/* accumulated entropy */
 	} ys_pool[RANDOM_YARROW_NPOOLS];/* pool[0] is fast, pool[1] is slow */
-	int ys_seeded;
+	bool ys_seeded;
 	/* Reseed lock */
 	mtx_t ys_mtx;
 } yarrow_state;
@@ -108,9 +115,7 @@ RANDOM_CHECK_UINT(slowoverthresh, 1, 5);
 
 static void random_yarrow_pre_read(void);
 static void random_yarrow_read(uint8_t *, u_int);
-static void random_yarrow_write(uint8_t *, u_int);
-static void random_yarrow_reseed(void);
-static int random_yarrow_seeded(void);
+static bool random_yarrow_seeded(void);
 static void random_yarrow_process_event(struct harvest_event *);
 static void random_yarrow_init_alg(void *);
 static void random_yarrow_deinit_alg(void *);
@@ -123,8 +128,6 @@ struct random_algorithm random_alg_context = {
 	.ra_deinit_alg = random_yarrow_deinit_alg,
 	.ra_pre_read = random_yarrow_pre_read,
 	.ra_read = random_yarrow_read,
-	.ra_write = random_yarrow_write,
-	.ra_reseed = random_yarrow_reseed,
 	.ra_seeded = random_yarrow_seeded,
 	.ra_event_processor = random_yarrow_process_event,
 	.ra_poolcount = RANDOM_YARROW_NPOOLS,
@@ -141,7 +144,7 @@ random_yarrow_init_alg(void *unused __unused)
 
 	RANDOM_RESEED_INIT_LOCK();
 	/* Start unseeded, therefore blocked. */
-	yarrow_state.ys_seeded = 0;
+	yarrow_state.ys_seeded = false;
 #ifdef _KERNEL
 	/*
 	 * Yarrow parameters. Do not adjust these unless you have
@@ -237,8 +240,8 @@ random_yarrow_process_event(struct harvest_event *event)
 		}
 	}
 	/*
-	 * If enough slow sources are over threshhold, then slow reseed
-	 * else if any fast source over threshhold, then fast reseed.
+	 * If enough slow sources are over threshold, then slow reseed
+	 * else if any fast source over threshold, then fast reseed.
 	 */
 	if (overthreshhold[RANDOM_YARROW_SLOW] >= yarrow_state.ys_slowoverthresh)
 		random_yarrow_reseed_internal(RANDOM_YARROW_SLOW);
@@ -264,18 +267,7 @@ random_yarrow_reseed_internal(u_int fastslow)
 	KASSERT(yarrow_state.ys_pool[RANDOM_YARROW_FAST].ysp_thresh > 0, ("random: Yarrow fast threshold = 0"));
 	KASSERT(yarrow_state.ys_pool[RANDOM_YARROW_SLOW].ysp_thresh > 0, ("random: Yarrow slow threshold = 0"));
 	RANDOM_RESEED_ASSERT_LOCK_OWNED();
-#ifdef RANDOM_DEBUG
-	/* WARNING! This is dangerously tedious to do with mutexes held! */
-	printf("random: %s %s seeded = %d\n", __func__, (fastslow == RANDOM_YARROW_FAST ? "RANDOM_YARROW_FAST" : "RANDOM_YARROW_SLOW"), yarrow_state.ys_seeded);
-	printf("random: %s - fast - thresh %d,1 - ", __func__, yarrow_state.ys_pool[RANDOM_YARROW_FAST].ysp_thresh);
-	for (i = RANDOM_START; i < ENTROPYSOURCE; i++)
-		printf(" %d", yarrow_state.ys_pool[RANDOM_YARROW_FAST].ysp_source_bits[i]);
-	printf("\n");
-	printf("random: %s - slow - thresh %d,%d - ", __func__, yarrow_state.ys_pool[RANDOM_YARROW_SLOW].ysp_thresh, yarrow_state.ys_slowoverthresh);
-	for (i = RANDOM_START; i < ENTROPYSOURCE; i++)
-		printf(" %d", yarrow_state.ys_pool[RANDOM_YARROW_SLOW].ysp_source_bits[i]);
-	printf("\n");
-#endif
+	SDT_PROBE3(random, yarrow, event_processor, debug, yarrow_state.ys_seeded, yarrow_state.ys_slowoverthresh, yarrow_state.ys_pool);
 	/* 1. Hash the accumulated entropy into v[0] */
 	randomdev_hash_init(&context);
 	/* Feed the slow pool hash in if slow */
@@ -338,7 +330,7 @@ random_yarrow_reseed_internal(u_int fastslow)
 #endif
 	/* Unblock the device if it was blocked due to being unseeded */
 	if (!yarrow_state.ys_seeded) {
-		yarrow_state.ys_seeded = 1;
+		yarrow_state.ys_seeded = true;
 		randomdev_unblock();
 	}
 }
@@ -382,7 +374,7 @@ random_yarrow_read(uint8_t *buf, u_int bytecount)
 
 	KASSERT((bytecount % RANDOM_BLOCKSIZE) == 0, ("%s(): bytecount (= %d) must be a multiple of %d", __func__, bytecount, RANDOM_BLOCKSIZE ));
 	RANDOM_RESEED_LOCK();
-	blockcount = (bytecount + RANDOM_BLOCKSIZE - 1)/RANDOM_BLOCKSIZE;
+	blockcount = howmany(bytecount, RANDOM_BLOCKSIZE);
 	for (i = 0; i < blockcount; i++) {
 		if (yarrow_state.ys_outputblocks++ >= yarrow_state.ys_gengateinterval) {
 			random_yarrow_generator_gate();
@@ -395,47 +387,7 @@ random_yarrow_read(uint8_t *buf, u_int bytecount)
 	RANDOM_RESEED_UNLOCK();
 }
 
-/* Internal function to hand external entropy to the PRNG. */
-void
-random_yarrow_write(uint8_t *buf, u_int count)
-{
-	static u_int destination = 0;
-	static struct harvest_event event;
-	struct randomdev_hash hash;
-	uint32_t entropy_data[RANDOM_KEYSIZE_WORDS], timestamp;
-	int i;
-
-	/* Extra timing here is helpful to scrape scheduler timing entropy */
-	randomdev_hash_init(&hash);
-	timestamp = (uint32_t)get_cyclecount();
-	randomdev_hash_iterate(&hash, &timestamp, sizeof(timestamp));
-	randomdev_hash_iterate(&hash, buf, count);
-	timestamp = (uint32_t)get_cyclecount();
-	randomdev_hash_iterate(&hash, &timestamp, sizeof(timestamp));
-	randomdev_hash_finish(&hash, entropy_data);
-	explicit_bzero(&hash, sizeof(hash));
-	for (i = 0; i < RANDOM_KEYSIZE_WORDS; i += sizeof(event.he_entropy)/sizeof(event.he_entropy[0])) {
-		event.he_somecounter = (uint32_t)get_cyclecount();
-		event.he_size = sizeof(event.he_entropy);
-		event.he_bits = event.he_size/8;
-		event.he_source = RANDOM_CACHED;
-		event.he_destination = destination++; /* Harmless cheating */
-		memcpy(event.he_entropy, entropy_data + i, sizeof(event.he_entropy));
-		random_yarrow_process_event(&event);
-	}
-	explicit_bzero(entropy_data, sizeof(entropy_data));
-}
-
-void
-random_yarrow_reseed(void)
-{
-
-	RANDOM_RESEED_LOCK();
-	random_yarrow_reseed_internal(RANDOM_YARROW_SLOW);
-	RANDOM_RESEED_UNLOCK();
-}
-
-int
+bool
 random_yarrow_seeded(void)
 {
 

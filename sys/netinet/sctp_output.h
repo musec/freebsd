@@ -80,7 +80,8 @@ sctp_send_initiate(struct sctp_inpcb *, struct sctp_tcb *, int
 );
 
 void
-sctp_send_initiate_ack(struct sctp_inpcb *, struct sctp_tcb *, struct mbuf *,
+sctp_send_initiate_ack(struct sctp_inpcb *, struct sctp_tcb *,
+    struct sctp_nets *, struct mbuf *,
     int, int,
     struct sockaddr *, struct sockaddr *,
     struct sctphdr *, struct sctp_init_chunk *,
@@ -181,7 +182,7 @@ void
 sctp_add_stream_reset_result_tsn(struct sctp_tmit_chunk *,
     uint32_t, uint32_t, uint32_t, uint32_t);
 int
-    sctp_send_stream_reset_out_if_possible(struct sctp_tcb *);
+    sctp_send_stream_reset_out_if_possible(struct sctp_tcb *, int);
 
 int
 sctp_send_str_reset_req(struct sctp_tcb *, uint16_t, uint16_t *,

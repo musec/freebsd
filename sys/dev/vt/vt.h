@@ -140,6 +140,7 @@ struct vt_device {
 	uint32_t		 vd_mstate;	/* (?) Mouse state. */
 	vt_axis_t		 vd_width;	/* (?) Screen width. */
 	vt_axis_t		 vd_height;	/* (?) Screen height. */
+	size_t			 vd_transpose;	/* (?) Screen offset in FB */
 	struct mtx		 vd_lock;	/* Per-device lock. */
 	struct cv		 vd_winswitch;	/* (d) Window switch notify. */
 	struct callout		 vd_timer;	/* (d) Display timer. */
@@ -368,6 +369,7 @@ struct vt_driver {
  * Utility macro to make early vt(4) instances work.
  */
 
+extern struct vt_device vt_consdev;
 extern struct terminal vt_consterm;
 extern const struct terminal_class vt_termclass;
 void vt_upgrade(struct vt_device *vd);
@@ -375,11 +377,11 @@ void vt_upgrade(struct vt_device *vd);
 #define	PIXEL_WIDTH(w)	((w) / 8)
 #define	PIXEL_HEIGHT(h)	((h) / 16)
 
-#ifndef VT_FB_DEFAULT_WIDTH
-#define	VT_FB_DEFAULT_WIDTH	2048
+#ifndef VT_FB_MAX_WIDTH
+#define	VT_FB_MAX_WIDTH	4096
 #endif
-#ifndef VT_FB_DEFAULT_HEIGHT
-#define	VT_FB_DEFAULT_HEIGHT	1200
+#ifndef VT_FB_MAX_HEIGHT
+#define	VT_FB_MAX_HEIGHT	2400
 #endif
 
 /* name argument is not used yet. */

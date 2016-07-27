@@ -367,7 +367,6 @@ static int
 ath_sysctl_tpscale(SYSCTL_HANDLER_ARGS)
 {
 	struct ath_softc *sc = arg1;
-	struct ifnet *ifp = sc->sc_ifp;
 	u_int32_t scale;
 	int error;
 
@@ -381,8 +380,7 @@ ath_sysctl_tpscale(SYSCTL_HANDLER_ARGS)
 		goto finish;
 
 	error = !ath_hal_settpscale(sc->sc_ah, scale) ? EINVAL :
-	    (ifp->if_drv_flags & IFF_DRV_RUNNING) ?
-	      ath_reset(ifp, ATH_RESET_NOLOSS) : 0;
+	    (sc->sc_running) ? ath_reset(sc, ATH_RESET_NOLOSS) : 0;
 
 finish:
 	ATH_LOCK(sc);
@@ -422,7 +420,6 @@ static int
 ath_sysctl_rfkill(SYSCTL_HANDLER_ARGS)
 {
 	struct ath_softc *sc = arg1;
-	struct ifnet *ifp = sc->sc_ifp;
 	struct ath_hal *ah = sc->sc_ah;
 	u_int rfkill;
 	int error;
@@ -444,8 +441,7 @@ ath_sysctl_rfkill(SYSCTL_HANDLER_ARGS)
 		error = EINVAL;
 		goto finish;
 	}
-	error = (ifp->if_drv_flags & IFF_DRV_RUNNING) ?
-	    ath_reset(ifp, ATH_RESET_FULL) : 0;
+	error = sc->sc_running ? ath_reset(sc, ATH_RESET_FULL) : 0;
 
 finish:
 	ATH_LOCK(sc);
@@ -671,8 +667,8 @@ ath_sysctl_intmit(SYSCTL_HANDLER_ARGS)
 	 * doesn't reset ANI related registers, so it'll leave
 	 * things in an inconsistent state.
 	 */
-	if (sc->sc_ifp->if_drv_flags & IFF_DRV_RUNNING)
-		ath_reset(sc->sc_ifp, ATH_RESET_NOLOSS);
+	if (sc->sc_running)
+		ath_reset(sc, ATH_RESET_NOLOSS);
 
 	error = 0;
 
@@ -713,7 +709,7 @@ ath_sysctl_forcebstuck(SYSCTL_HANDLER_ARGS)
 	if (val == 0)
 		return 0;
 
-	taskqueue_enqueue_fast(sc->sc_tq, &sc->sc_bstucktask);
+	taskqueue_enqueue(sc->sc_tq, &sc->sc_bstucktask);
 	val = 0;
 	return 0;
 }
@@ -1286,9 +1282,18 @@ ath_sysctl_stats_attach(struct ath_softc *sc)
 	    &sc->sc_stats.ast_rx_keymiss, 0, "");
 	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_swfiltered", CTLFLAG_RD,
 	    &sc->sc_stats.ast_tx_swfiltered, 0, "");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_nodeq_overflow",
+	    CTLFLAG_RD, &sc->sc_stats.ast_tx_nodeq_overflow, 0,
+	    "tx dropped 'cuz nodeq overflow");
 	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_rx_stbc",
 	    CTLFLAG_RD, &sc->sc_stats.ast_rx_stbc, 0,
 	    "Number of STBC frames received");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_stbc",
+	    CTLFLAG_RD, &sc->sc_stats.ast_tx_stbc, 0,
+	    "Number of STBC frames transmitted");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_ldpc",
+	    CTLFLAG_RD, &sc->sc_stats.ast_tx_ldpc, 0,
+	    "Number of LDPC frames transmitted");
 	
 	/* Attach the RX phy error array */
 	ath_sysctl_stats_attach_rxphyerr(sc, child);

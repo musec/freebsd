@@ -29,15 +29,12 @@ static const char rcsid[] =
   "$FreeBSD$";
 #endif /* not lint */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/types.h>
 #include <sys/stat.h>
-#include <sys/param.h>
-#include <unistd.h>
+
 #include <dirent.h>
 #include <fcntl.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "pwupd.h"
 
@@ -53,6 +50,9 @@ rm_r(int rootfd, const char *path, uid_t uid)
 		path++;
 
 	dirfd = openat(rootfd, path, O_DIRECTORY);
+	if (dirfd == -1) {
+		return;
+	}
 
 	d = fdopendir(dirfd);
 	while ((e = readdir(d)) != NULL) {

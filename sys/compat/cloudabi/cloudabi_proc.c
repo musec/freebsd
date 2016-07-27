@@ -27,30 +27,39 @@
 __FBSDID("$FreeBSD$");
 
 #include <sys/param.h>
+#include <sys/capsicum.h>
+#include <sys/filedesc.h>
 #include <sys/imgact.h>
 #include <sys/lock.h>
+#include <sys/module.h>
 #include <sys/mutex.h>
 #include <sys/proc.h>
 #include <sys/signalvar.h>
 #include <sys/syscallsubr.h>
 #include <sys/unistd.h>
 
+#include <contrib/cloudabi/cloudabi_types_common.h>
+
 #include <compat/cloudabi/cloudabi_proto.h>
-#include <compat/cloudabi/cloudabi_syscalldefs.h>
 
 int
 cloudabi_sys_proc_exec(struct thread *td,
     struct cloudabi_sys_proc_exec_args *uap)
 {
 	struct image_args args;
+	struct vmspace *oldvmspace;
 	int error;
 
+	error = pre_execve(td, &oldvmspace);
+	if (error != 0)
+		return (error);
 	error = exec_copyin_data_fds(td, &args, uap->data, uap->datalen,
 	    uap->fds, uap->fdslen);
 	if (error == 0) {
 		args.fd = uap->fd;
 		error = kern_execve(td, &args, NULL);
 	}
+	post_execve(td, error, oldvmspace);
 	return (error);
 }
 
@@ -67,10 +76,16 @@ int
 cloudabi_sys_proc_fork(struct thread *td,
     struct cloudabi_sys_proc_fork_args *uap)
 {
-	struct proc *p2;
+	struct fork_req fr;
+	struct filecaps fcaps = {};
 	int error, fd;
 
-	error = fork1(td, RFFDG | RFPROC | RFPROCDESC, 0, &p2, &fd, 0);
+	cap_rights_init(&fcaps.fc_rights, CAP_FSTAT, CAP_EVENT);
+	bzero(&fr, sizeof(fr));
+	fr.fr_flags = RFFDG | RFPROC | RFPROCDESC;
+	fr.fr_pd_fd = &fd;
+	fr.fr_pd_fcaps = &fcaps;
+	error = fork1(td, &fr);
 	if (error != 0)
 		return (error);
 	/* Return the file descriptor to the parent process. */
@@ -129,3 +144,5 @@ cloudabi_sys_proc_raise(struct thread *td,
 	PROC_UNLOCK(p);
 	return (0);
 }
+
+MODULE_VERSION(cloudabi, 1);

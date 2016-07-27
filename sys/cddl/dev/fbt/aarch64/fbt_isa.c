@@ -46,19 +46,16 @@
 #define	FBT_RETURN	"return"
 
 int
-fbt_invop(uintptr_t addr, uintptr_t *stack, uintptr_t rval)
+fbt_invop(uintptr_t addr, struct trapframe *frame, uintptr_t rval)
 {
-	struct trapframe *frame;
 	solaris_cpu_t *cpu;
 	fbt_probe_t *fbt;
 
-	frame = (struct trapframe *)stack;
 	cpu = &solaris_cpu[curcpu];
 	fbt = fbt_probetab[FBT_ADDR2NDX(addr)];
 
 	for (; fbt != NULL; fbt = fbt->fbtp_hashnext) {
 		if ((uintptr_t)fbt->fbtp_patchpoint == addr) {
-			fbt->fbtp_invop_cnt++;
 			cpu->cpu_dtrace_caller = addr;
 
 			dtrace_probe(fbt->fbtp_id, frame->tf_x[0],

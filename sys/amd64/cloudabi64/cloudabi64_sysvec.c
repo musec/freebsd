@@ -27,94 +27,63 @@
 __FBSDID("$FreeBSD$");
 
 #include <sys/param.h>
-#include <sys/exec.h>
 #include <sys/imgact.h>
-#include <sys/imgact_elf.h>
 #include <sys/kernel.h>
-#include <sys/module.h>
 #include <sys/proc.h>
-#include <sys/smp.h>
 #include <sys/sysent.h>
-#include <sys/systm.h>
 
-#include <vm/pmap.h>
 #include <vm/vm.h>
+#include <vm/pmap.h>
 
 #include <machine/frame.h>
 #include <machine/pcb.h>
-#include <machine/pmap.h>
-#include <machine/psl.h>
 #include <machine/vmparam.h>
 
 #include <compat/cloudabi/cloudabi_util.h>
 
 #include <compat/cloudabi64/cloudabi64_syscall.h>
-#include <compat/cloudabi64/cloudabi64_syscalldefs.h>
 #include <compat/cloudabi64/cloudabi64_util.h>
 
 extern const char *cloudabi64_syscallnames[];
 extern struct sysent cloudabi64_sysent[];
 
-static register_t *
-cloudabi64_copyout_strings(struct image_params *imgp)
-{
-	uintptr_t begin;
-	size_t len;
-
-	/* Copy out program arguments. */
-	len = imgp->args->begin_envv - imgp->args->begin_argv;
-	begin = rounddown2(USRSTACK - len, sizeof(register_t));
-	copyout(imgp->args->begin_argv, (void *)begin, len);
-	return ((register_t *)begin);
-}
-
 static int
-cloudabi64_fixup(register_t **stack_base, struct image_params *imgp)
+cloudabi64_fixup_tcb(register_t **stack_base, struct image_params *imgp)
 {
-	char canarybuf[64];
-	Elf64_Auxargs *args;
-	void *argdata, *canary;
-	size_t argdatalen;
 	int error;
+	register_t tcbptr;
 
-	/* Store canary for stack smashing protection. */
-	argdata = *stack_base;
-	arc4rand(canarybuf, sizeof(canarybuf), 0);
-	*stack_base -= howmany(sizeof(canarybuf), sizeof(register_t));
-	canary = *stack_base;
-	error = copyout(canarybuf, canary, sizeof(canarybuf));
+	/* Place auxiliary vector and TCB on the stack. */
+	error = cloudabi64_fixup(stack_base, imgp);
 	if (error != 0)
 		return (error);
+	
+	/*
+	 * On x86-64, the TCB is referred to by %fs:0. Take some space
+	 * from the top of the stack to store a single element array,
+	 * containing a pointer to the TCB. %fs base will point to this.
+	 */
+	tcbptr = (register_t)*stack_base;
+	return (copyout(&tcbptr, --*stack_base, sizeof(tcbptr)));
+}
+
+static void
+cloudabi64_proc_setregs(struct thread *td, struct image_params *imgp,
+    unsigned long stack)
+{
+	struct trapframe *regs;
+
+	exec_setregs(td, imgp, stack);
 
 	/*
-	 * Compute length of program arguments. As the argument data is
-	 * binary safe, we had to add a trailing null byte in
-	 * exec_copyin_data_fds(). Undo this by reducing the length.
+	 * The stack now contains a pointer to the TCB, the TCB itself,
+	 * and the auxiliary vector. Let %rdx point to the auxiliary
+	 * vector, and set %fs base to the address of the TCB.
 	 */
-	args = (Elf64_Auxargs *)imgp->auxargs;
-	argdatalen = imgp->args->begin_envv - imgp->args->begin_argv;
-	if (argdatalen > 0)
-		--argdatalen;
-
-	/* Write out an auxiliary vector. */
-	cloudabi64_auxv_t auxv[] = {
-#define	VAL(type, val)	{ .a_type = (type), .a_val = (val) }
-#define	PTR(type, ptr)	{ .a_type = (type), .a_ptr = (uintptr_t)(ptr) }
-		PTR(CLOUDABI_AT_ARGDATA, argdata),
-		VAL(CLOUDABI_AT_ARGDATALEN, argdatalen),
-		PTR(CLOUDABI_AT_CANARY, canary),
-		VAL(CLOUDABI_AT_CANARYLEN, sizeof(canarybuf)),
-		VAL(CLOUDABI_AT_NCPUS, mp_ncpus),
-		VAL(CLOUDABI_AT_PAGESZ, args->pagesz),
-		PTR(CLOUDABI_AT_PHDR, args->phdr),
-		VAL(CLOUDABI_AT_PHNUM, args->phnum),
-		VAL(CLOUDABI_AT_TID, curthread->td_tid),
-#undef VAL
-#undef PTR
-		{ .a_type = CLOUDABI_AT_NULL },
-	};
-	*stack_base -= howmany(sizeof(auxv), sizeof(register_t));
-	return (copyout(auxv, *stack_base, sizeof(auxv)));
+	regs = td->td_frame;
+	regs->tf_rdi = stack + sizeof(register_t) +
+	    roundup(sizeof(cloudabi64_tcb_t), sizeof(register_t));
+	(void)cpu_set_user_tls(td, (void *)stack);
 }
 
 static int
@@ -127,6 +96,7 @@ cloudabi64_fetch_syscall_args(struct thread *td, struct syscall_args *sa)
 	if (sa->code >= CLOUDABI64_SYS_MAXSYSCALL)
 		return (ENOSYS);
 	sa->callp = &cloudabi64_sysent[sa->code];
+	sa->narg = sa->callp->sy_narg;
 
 	/* Fetch system call arguments. */
 	sa->args[0] = frame->tf_rdi;
@@ -180,17 +150,30 @@ cloudabi64_schedtail(struct thread *td)
 	frame->tf_rdx = td->td_tid;
 }
 
-void
+int
 cloudabi64_thread_setregs(struct thread *td,
-    const cloudabi64_threadattr_t *attr)
+    const cloudabi64_threadattr_t *attr, uint64_t tcb)
 {
 	struct trapframe *frame;
 	stack_t stack;
+	uint64_t tcbptr;
+	int error;
+
+	/*
+	 * On x86-64, the TCB is referred to by %fs:0. Take some space
+	 * from the top of the stack to store a single element array,
+	 * containing a pointer to the TCB. %fs base will point to this.
+	 */
+	tcbptr = rounddown(attr->stack + attr->stack_size - sizeof(tcbptr),
+	    _Alignof(tcbptr));
+	error = copyout(&tcb, (void *)tcbptr, sizeof(tcb));
+	if (error != 0)
+		return (error);
 
 	/* Perform standard register initialization. */
 	stack.ss_sp = (void *)attr->stack;
-	stack.ss_size = attr->stack_size;
-	cpu_set_upcall_kse(td, (void *)attr->entry_point, NULL, &stack);
+	stack.ss_size = tcbptr - attr->stack;
+	cpu_set_upcall(td, (void *)attr->entry_point, NULL, &stack);
 
 	/*
 	 * Pass in the thread ID of the new thread and the argument
@@ -200,12 +183,14 @@ cloudabi64_thread_setregs(struct thread *td,
 	frame = td->td_frame;
 	frame->tf_rdi = td->td_tid;
 	frame->tf_rsi = attr->argument;
+
+	return (cpu_set_user_tls(td, (void *)tcbptr));
 }
 
 static struct sysentvec cloudabi64_elf_sysvec = {
 	.sv_size		= CLOUDABI64_SYS_MAXSYSCALL,
 	.sv_table		= cloudabi64_sysent,
-	.sv_fixup		= cloudabi64_fixup,
+	.sv_fixup		= cloudabi64_fixup_tcb,
 	.sv_name		= "CloudABI ELF64",
 	.sv_coredump		= elf64_coredump,
 	.sv_pagesize		= PAGE_SIZE,
@@ -214,7 +199,8 @@ static struct sysentvec cloudabi64_elf_sysvec = {
 	.sv_usrstack		= USRSTACK,
 	.sv_stackprot		= VM_PROT_READ | VM_PROT_WRITE,
 	.sv_copyout_strings	= cloudabi64_copyout_strings,
-	.sv_flags		= SV_ABI_CLOUDABI,
+	.sv_setregs		= cloudabi64_proc_setregs,
+	.sv_flags		= SV_ABI_CLOUDABI | SV_CAPSICUM | SV_LP64,
 	.sv_set_syscall_retval	= cloudabi64_set_syscall_retval,
 	.sv_fetch_syscall_args	= cloudabi64_fetch_syscall_args,
 	.sv_syscallnames	= cloudabi64_syscallnames,
@@ -223,42 +209,10 @@ static struct sysentvec cloudabi64_elf_sysvec = {
 
 INIT_SYSENTVEC(elf_sysvec, &cloudabi64_elf_sysvec);
 
-static Elf64_Brandinfo cloudabi64_brand = {
+Elf64_Brandinfo cloudabi64_brand = {
 	.brand		= ELFOSABI_CLOUDABI,
 	.machine	= EM_X86_64,
 	.sysvec		= &cloudabi64_elf_sysvec,
+	.flags		= BI_CAN_EXEC_DYN,
 	.compat_3_brand	= "CloudABI",
 };
-
-static int
-cloudabi64_modevent(module_t mod, int type, void *data)
-{
-
-	switch (type) {
-	case MOD_LOAD:
-		if (elf64_insert_brand_entry(&cloudabi64_brand) < 0) {
-			printf("Failed to add CloudABI ELF brand handler\n");
-			return (EINVAL);
-		}
-		return (0);
-	case MOD_UNLOAD:
-		if (elf64_brand_inuse(&cloudabi64_brand))
-			return (EBUSY);
-		if (elf64_remove_brand_entry(&cloudabi64_brand) < 0) {
-			printf("Failed to remove CloudABI ELF brand handler\n");
-			return (EINVAL);
-		}
-		return (0);
-	default:
-		return (EOPNOTSUPP);
-	}
-}
-
-static moduledata_t cloudabi64_module = {
-	"cloudabi64",
-	cloudabi64_modevent,
-	NULL
-};
-
-DECLARE_MODULE_TIED(cloudabi64, cloudabi64_module, SI_SUB_EXEC, SI_ORDER_ANY);
-MODULE_DEPEND(cloudabi64, cloudabi, 1, 1, 1);

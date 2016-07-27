@@ -63,7 +63,7 @@ __FBSDID("$FreeBSD$");
 
 #define MAX_LD 8192
 #define LD_PER_PAGE 512
-#define NEW_MAX_LD(num)  ((num + LD_PER_PAGE) & ~(LD_PER_PAGE-1))
+#define	NEW_MAX_LD(num)  rounddown2(num + LD_PER_PAGE, LD_PER_PAGE)
 #define SIZE_FROM_LARGEST_LD(num) (NEW_MAX_LD(num) << 3)
 #define	NULL_LDT_BASE	((caddr_t)NULL)
 
@@ -275,8 +275,7 @@ i386_extend_pcb(struct thread *td)
 	ext = (struct pcb_ext *)kmem_malloc(kernel_arena, ctob(IOPAGES+1),
 	    M_WAITOK | M_ZERO);
 	/* -16 is so we can convert a trapframe into vm86trapframe inplace */
-	ext->ext_tss.tss_esp0 = td->td_kstack + ctob(KSTACK_PAGES) -
-	    sizeof(struct pcb) - 16;
+	ext->ext_tss.tss_esp0 = (vm_offset_t)td->td_pcb - 16;
 	ext->ext_tss.tss_ss0 = GSEL(GDATA_SEL, SEL_KPL);
 	/*
 	 * The last byte of the i/o map must be followed by an 0xff byte.
@@ -316,8 +315,9 @@ i386_set_ioperm(td, uap)
 	struct thread *td;
 	struct i386_ioperm_args *uap;
 {
-	int i, error;
 	char *iomap;
+	u_int i;
+	int error;
 
 	if ((error = priv_check(td, PRIV_IO)) != 0)
 		return (error);
@@ -335,7 +335,8 @@ i386_set_ioperm(td, uap)
 			return (error);
 	iomap = (char *)td->td_pcb->pcb_ext->ext_iomap;
 
-	if (uap->start + uap->length > IOPAGES * PAGE_SIZE * NBBY)
+	if (uap->start > uap->start + uap->length ||
+	    uap->start + uap->length > IOPAGES * PAGE_SIZE * NBBY)
 		return (EINVAL);
 
 	for (i = uap->start; i < uap->start + uap->length; i++) {

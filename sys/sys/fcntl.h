@@ -131,6 +131,7 @@ typedef	__pid_t		pid_t;
 
 #if __BSD_VISIBLE
 #define	O_VERIFY	0x00200000	/* open only after verification */
+#define	O_BENEATH	0x00400000	/* stay beneath a specified directory */
 #endif
 
 /*

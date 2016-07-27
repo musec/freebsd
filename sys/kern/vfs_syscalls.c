@@ -959,7 +959,7 @@ kern_openat(struct thread *td, int fd, char *path, enum uio_seg pathseg,
 	struct vnode *vp;
 	struct nameidata nd;
 	cap_rights_t rights;
-	int cmode, error, indx;
+	int beneath, cmode, error, indx;
 
 	indx = -1;
 
@@ -968,6 +968,7 @@ kern_openat(struct thread *td, int fd, char *path, enum uio_seg pathseg,
 	/* XXX: audit dirfd */
 	cap_rights_init(&rights, CAP_LOOKUP);
 	flags_to_rights(flags, &rights);
+	beneath = ((flags & O_BENEATH) == O_BENEATH);
 	/*
 	 * Only one of the O_EXEC, O_RDONLY, O_WRONLY and O_RDWR flags
 	 * may be specified.
@@ -996,6 +997,8 @@ kern_openat(struct thread *td, int fd, char *path, enum uio_seg pathseg,
 	cmode = ((mode & ~fdp->fd_cmask) & ALLPERMS) & ~S_ISTXT;
 	NDINIT_ATRIGHTS(&nd, LOOKUP, FOLLOW | AUDITVNODE1, pathseg, path, fd,
 	    &rights, td);
+	if (beneath)
+		nd.ni_nonrelativeerrno = EPERM;
 	td->td_dupfd = -1;		/* XXX check for fdopen */
 	error = vn_open(&nd, &flags, cmode, fp);
 	if (error != 0) {
@@ -1010,11 +1013,13 @@ kern_openat(struct thread *td, int fd, char *path, enum uio_seg pathseg,
 		/*
 		 * Handle special fdopen() case. bleh.
 		 *
-		 * Don't do this for relative (capability) lookups; we don't
+		 * Don't do this for capability or O_BENEATH lookups: we don't
 		 * understand exactly what would happen, and we don't think
 		 * that it ever should.
+		 *
+		 * XXXJA: can fdopen() ever be called with O_BENEATH?
 		 */
-		if (nd.ni_strictrelative == 0 &&
+		if (nd.ni_nonrelativeerrno == 0 &&
 		    (error == ENODEV || error == ENXIO) &&
 		    td->td_dupfd >= 0) {
 			error = dupfdopen(td, fdp, td->td_dupfd, flags, error,
@@ -1060,7 +1065,8 @@ success:
 		struct filecaps *fcaps;
 
 #ifdef CAPABILITIES
-		if (nd.ni_strictrelative == 1)
+		if (nd.ni_nonrelativeerrno != 0 &&
+		    cap_rights_is_valid(&nd.ni_filecaps.fc_rights))
 			fcaps = &nd.ni_filecaps;
 		else
 #endif

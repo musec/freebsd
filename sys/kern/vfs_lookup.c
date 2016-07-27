@@ -115,12 +115,12 @@ namei_handle_root(struct nameidata *ndp, struct vnode **dpp)
 	struct componentname *cnp;
 
 	cnp = &ndp->ni_cnd;
-	if (ndp->ni_strictrelative != 0) {
+	if (ndp->ni_nonrelativeerrno != 0) {
 #ifdef KTRACE
 		if (KTRPOINT(curthread, KTR_CAPFAIL))
 			ktrcapfail(CAPFAIL_LOOKUP, NULL, NULL);
 #endif
-		return (ENOTCAPABLE);
+		return (ndp->ni_nonrelativeerrno);
 	}
 	while (*(cnp->cn_nameptr) == '/') {
 		cnp->cn_nameptr++;
@@ -206,7 +206,8 @@ namei(struct nameidata *ndp)
 	 */
 	if (error == 0 && IN_CAPABILITY_MODE(td) &&
 	    (cnp->cn_flags & NOCAPCHECK) == 0) {
-		ndp->ni_strictrelative = 1;
+		if (ndp->ni_nonrelativeerrno != EPERM)
+			ndp->ni_nonrelativeerrno = ENOTCAPABLE;
 		if (ndp->ni_dirfd == AT_FDCWD) {
 #ifdef KTRACE
 			if (KTRPOINT(td, KTR_CAPFAIL))
@@ -274,14 +275,17 @@ namei(struct nameidata *ndp)
 			 * If file descriptor doesn't have all rights,
 			 * all lookups relative to it must also be
 			 * strictly relative.
+			 *
+			 * Don't overwrite a value of EPERM, however:
+			 * we need to honour a user O_BENEATH request.
 			 */
 			CAP_ALL(&rights);
-			if (!cap_rights_contains(&ndp->ni_filecaps.fc_rights,
-			    &rights) ||
-			    ndp->ni_filecaps.fc_fcntls != CAP_FCNTL_ALL ||
-			    ndp->ni_filecaps.fc_nioctls != -1) {
-				ndp->ni_strictrelative = 1;
-			}
+			if ((!cap_rights_contains(&ndp->ni_filecaps.fc_rights,
+			      &rights) ||
+			      ndp->ni_filecaps.fc_fcntls != CAP_FCNTL_ALL ||
+			      ndp->ni_filecaps.fc_nioctls != -1) &&
+			    ndp->ni_nonrelativeerrno != EPERM)
+				ndp->ni_nonrelativeerrno = ENOTCAPABLE;
 #endif
 		}
 		if (error == 0 && dp->v_type != VDIR)
@@ -642,12 +646,21 @@ dirloop:
 	 *    the jail or chroot, don't let them out.
 	 */
 	if (cnp->cn_flags & ISDOTDOT) {
-		if (ndp->ni_strictrelative != 0) {
 #ifdef KTRACE
+		switch (ndp->ni_nonrelativeerrno) {
+		case EPERM:
+			if (KTRPOINT(curthread, KTR_NAMEI))
+				ktrnamei(cnp->cn_nameptr);
+			break;
+
+		case ENOTCAPABLE:
 			if (KTRPOINT(curthread, KTR_CAPFAIL))
 				ktrcapfail(CAPFAIL_LOOKUP, NULL, NULL);
+			break;
+		}
 #endif
-			error = ENOTCAPABLE;
+		if (ndp->ni_nonrelativeerrno != 0) {
+			error = ndp->ni_nonrelativeerrno;
 			goto bad;
 		}
 		if ((cnp->cn_flags & ISLASTCN) != 0 &&
@@ -1082,7 +1095,7 @@ NDINIT_ALL(struct nameidata *ndp, u_long op, u_long flags, enum uio_seg segflg,
 	ndp->ni_dirp = namep;
 	ndp->ni_dirfd = dirfd;
 	ndp->ni_startdir = startdir;
-	ndp->ni_strictrelative = 0;
+	ndp->ni_nonrelativeerrno = 0;
 	if (rightsp != NULL)
 		ndp->ni_rightsneeded = *rightsp;
 	else

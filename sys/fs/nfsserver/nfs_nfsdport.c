@@ -349,7 +349,7 @@ nfsvno_namei(struct nfsrv_descript *nd, struct nameidata *ndp,
 
 	*retdirp = NULL;
 	cnp->cn_nameptr = cnp->cn_pnbuf;
-	ndp->ni_strictrelative = 0;
+	ndp->ni_nonrelativeerrno = 0;
 	/*
 	 * Extract and set starting directory.
 	 */

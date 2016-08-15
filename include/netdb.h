@@ -214,9 +214,7 @@ struct addrinfo {
 #define	NI_NAMEREQD	0x00000004
 #define	NI_NUMERICSERV	0x00000008
 #define	NI_DGRAM	0x00000010
-#if 0 /* obsolete */
-#define NI_WITHSCOPEID	0x00000020
-#endif
+#define	NI_NUMERICSCOPE	0x00000020
 
 /*
  * Scope delimit character
@@ -275,6 +273,7 @@ int		getnetbyname_r(const char *, struct netent *, char *, size_t,
 int		getnetent_r(struct netent *, char *, size_t, struct netent **,
     int *);
 int		getnetgrent(char **, char **, char **);
+int		getnetgrent_r(char **, char **, char **, char *, size_t);
 int		getprotobyname_r(const char *, struct protoent *, char *,
     size_t, struct protoent **);
 int		getprotobynumber_r(int, struct protoent *, char *, size_t,

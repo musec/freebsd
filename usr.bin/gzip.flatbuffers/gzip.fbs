@@ -1,0 +1,30 @@
+namespace Gzip;
+
+table Compress {
+    fd_in:ulong;
+    fd_out:ulong;
+    orignal_name:string;
+    mtime:uint;
+}
+
+table Uncompress {
+    fd_in:ulong;
+    fd_out:ulong;
+    filename:string;
+    pre:string;
+    prelen:uint;
+}
+
+table Return {
+    size:uint;
+    bytes_read:uint;
+}
+
+union Data { Compress, Uncompress, Return }
+
+table Message {
+    data:Data;
+}
+
+root_type Message;
+

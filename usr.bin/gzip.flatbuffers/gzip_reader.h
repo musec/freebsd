@@ -57,9 +57,9 @@ __flatbuffers_scalar_field(flatbuffers_uint64, 1, 0, t)
 static inline int Gzip_Compress_fd_out_is_present(Gzip_Compress_table_t t)
 __flatbuffers_field_present(1, t)
 
-static inline flatbuffers_string_t Gzip_Compress_orignal_name(Gzip_Compress_table_t t)
+static inline flatbuffers_string_t Gzip_Compress_original_name(Gzip_Compress_table_t t)
 __flatbuffers_vector_field(flatbuffers_string_t, 2, t, 0)
-static inline int Gzip_Compress_orignal_name_is_present(Gzip_Compress_table_t t)
+static inline int Gzip_Compress_original_name_is_present(Gzip_Compress_table_t t)
 __flatbuffers_field_present(2, t)
 
 static inline uint32_t Gzip_Compress_mtime(Gzip_Compress_table_t t)
@@ -125,9 +125,9 @@ __flatbuffers_scalar_field(flatbuffers_uint32, 0, 0, t)
 static inline int Gzip_Return_size_is_present(Gzip_Return_table_t t)
 __flatbuffers_field_present(0, t)
 
-static inline uint32_t Gzip_Return_bytes_read(Gzip_Return_table_t t)
+static inline uint32_t Gzip_Return_bytes(Gzip_Return_table_t t)
 __flatbuffers_scalar_field(flatbuffers_uint32, 1, 0, t)
-static inline int Gzip_Return_bytes_read_is_present(Gzip_Return_table_t t)
+static inline int Gzip_Return_bytes_is_present(Gzip_Return_table_t t)
 __flatbuffers_field_present(1, t)
 
 typedef uint8_t Gzip_Data_union_type_t;

@@ -3,7 +3,7 @@ namespace Gzip;
 table Compress {
     fd_in:ulong;
     fd_out:ulong;
-    orignal_name:string;
+    original_name:string;
     mtime:uint;
 }
 
@@ -17,7 +17,7 @@ table Uncompress {
 
 table Return {
     size:uint;
-    bytes_read:uint;
+    bytes:uint;
 }
 
 union Data { Compress, Uncompress, Return }

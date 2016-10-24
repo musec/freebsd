@@ -65,7 +65,7 @@ static inline Gzip_Data_union_ref_t Gzip_Data_as_Return(Gzip_Return_ref_t ref)
 
 __flatbuffers_build_scalar_field(0, flatbuffers_, Gzip_Compress_fd_in, flatbuffers_uint64, uint64_t, 8, 8, 0)
 __flatbuffers_build_scalar_field(1, flatbuffers_, Gzip_Compress_fd_out, flatbuffers_uint64, uint64_t, 8, 8, 0)
-__flatbuffers_build_string_field(2, flatbuffers_, Gzip_Compress_orignal_name)
+__flatbuffers_build_string_field(2, flatbuffers_, Gzip_Compress_original_name)
 __flatbuffers_build_scalar_field(3, flatbuffers_, Gzip_Compress_mtime, flatbuffers_uint32, uint32_t, 4, 4, 0)
 
 static inline Gzip_Compress_ref_t Gzip_Compress_create(flatbuffers_builder_t *B __Gzip_Compress_formal_args)
@@ -73,7 +73,7 @@ static inline Gzip_Compress_ref_t Gzip_Compress_create(flatbuffers_builder_t *B 
     if (Gzip_Compress_start(B)
         || Gzip_Compress_fd_in_add(B, v0)
         || Gzip_Compress_fd_out_add(B, v1)
-        || Gzip_Compress_orignal_name_add(B, v2)
+        || Gzip_Compress_original_name_add(B, v2)
         || Gzip_Compress_mtime_add(B, v3)) {
         return 0;
     }
@@ -102,13 +102,13 @@ static inline Gzip_Uncompress_ref_t Gzip_Uncompress_create(flatbuffers_builder_t
 __flatbuffers_build_table_prolog(flatbuffers_, Gzip_Uncompress, Gzip_Uncompress_identifier, Gzip_Uncompress_type_identifier)
 
 __flatbuffers_build_scalar_field(0, flatbuffers_, Gzip_Return_size, flatbuffers_uint32, uint32_t, 4, 4, 0)
-__flatbuffers_build_scalar_field(1, flatbuffers_, Gzip_Return_bytes_read, flatbuffers_uint32, uint32_t, 4, 4, 0)
+__flatbuffers_build_scalar_field(1, flatbuffers_, Gzip_Return_bytes, flatbuffers_uint32, uint32_t, 4, 4, 0)
 
 static inline Gzip_Return_ref_t Gzip_Return_create(flatbuffers_builder_t *B __Gzip_Return_formal_args)
 {
     if (Gzip_Return_start(B)
         || Gzip_Return_size_add(B, v0)
-        || Gzip_Return_bytes_read_add(B, v1)) {
+        || Gzip_Return_bytes_add(B, v1)) {
         return 0;
     }
     return Gzip_Return_end(B);

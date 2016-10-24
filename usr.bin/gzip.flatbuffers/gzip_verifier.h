@@ -30,7 +30,7 @@ static int __Gzip_Compress_table_verifier(flatcc_table_verifier_descriptor_t *td
     int ret;
     if ((ret = flatcc_verify_field(td, 0, 8, 8) /* fd_in */)) return ret;
     if ((ret = flatcc_verify_field(td, 1, 8, 8) /* fd_out */)) return ret;
-    if ((ret = flatcc_verify_string_field(td, 2, 0) /* orignal_name */)) return ret;
+    if ((ret = flatcc_verify_string_field(td, 2, 0) /* original_name */)) return ret;
     if ((ret = flatcc_verify_field(td, 3, 4, 4) /* mtime */)) return ret;
     return flatcc_verify_ok;
 }
@@ -90,7 +90,7 @@ static int __Gzip_Return_table_verifier(flatcc_table_verifier_descriptor_t *td)
 {
     int ret;
     if ((ret = flatcc_verify_field(td, 0, 4, 4) /* size */)) return ret;
-    if ((ret = flatcc_verify_field(td, 1, 4, 4) /* bytes_read */)) return ret;
+    if ((ret = flatcc_verify_field(td, 1, 4, 4) /* bytes */)) return ret;
     return flatcc_verify_ok;
 }
 

@@ -233,3 +233,10 @@ void	maybe_warnx(const char *fmt, ...) __printflike(1, 2);
  * SUCH DAMAGE.
  *
  */
+
+
+
+/* */
+off_t gz_compress(int in, int out, off_t *gsizep, const char *origname, uint32_t mtime);
+off_t gz_uncompress(int in, int out, char *pre, size_t prelen, off_t *gsizep,
+	      const char *filename);

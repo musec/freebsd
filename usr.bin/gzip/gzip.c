@@ -301,7 +301,10 @@ static const struct option longopts[] = {
 int
 main(int argc, char **argv)
 {
-	const char *progname = getprogname();
+    struct timeval tv1, tv2;
+    gettimeofday(&tv1, NULL);
+	
+    const char *progname = getprogname();
 #ifndef SMALL
 	char *gzip;
 	int len;
@@ -420,6 +423,11 @@ main(int argc, char **argv)
 	if (qflag == 0 && lflag && argc > 1)
 		print_list(-1, 0, "(totals)", 0);
 #endif
+    gettimeofday(&tv2, NULL);
+
+    printf("%f\n", 
+        (double) (tv2.tv_usec - tv1.tv_usec) / 1000000 +
+        (double) (tv2.tv_sec - tv1.tv_sec));
 	exit(exit_value);
 }
 

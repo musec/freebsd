@@ -57,9 +57,6 @@ SUBDIR=	alias \
 	getopt \
 	grep \
 	gzip \
-	gzip.nv \
-	gzip.flatbuffers \
-	gzip.avro \
 	head \
 	hexdump \
 	id \

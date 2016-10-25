@@ -432,7 +432,7 @@ void gz_compress_unwrapper(avro_value_t* request, int* fds, int* nonces, int soc
 
     avro_value_t origname_value;
     const char* origname;
-    if (avro_value_get_by_name( request, "filename", &origname_value, NULL ) == 0 )
+    if (avro_value_get_by_name( request, "name", &origname_value, NULL ) == 0 )
     {
         avro_value_get_string(&origname_value, &origname, NULL);
     }

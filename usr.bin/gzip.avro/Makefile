@@ -10,13 +10,6 @@ BINDIR=		usr/bin
 MAN=		gzip.1 gzexe.1 zdiff.1 zforce.1 zmore.1 znew.1
 
 LIBADD=		z lzma
-LDADD+=-lavro
-LDADD+=-ljansson
-
-EXT_INC_DIR=-Iinclude
-EXT_LIB_DIR=-Llib
-
-CFLAGS+= ${EXT_INC_DIR} ${EXT_LIB_DIR}
 
 .if ${MK_BZIP2_SUPPORT} != "no"
 LIBADD+=	bz2
@@ -41,5 +34,6 @@ LINKS+=		${BINDIR}/gzip.avro ${BINDIR}/gunzip.avro \
 #SUBDIR+=	tests
 #.endif
 
+.include "${.CURDIR}/Makefile.inc" 
 .include <bsd.prog.mk>
 CFLAGS:=${CFLAGS:S/-Werror//}

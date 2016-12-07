@@ -1,0 +1,1 @@
+gzip.proto.full: /usr/lib/libc.a /usr/lib/libz.a /usr/lib/liblzma.a /usr/lib/libbz2.a

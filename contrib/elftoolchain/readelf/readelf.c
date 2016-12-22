@@ -47,7 +47,7 @@
 
 #include "_elftc.h"
 
-ELFTC_VCSID("$Id: readelf.c 3469 2016-05-15 23:16:09Z emaste $");
+ELFTC_VCSID("$Id: readelf.c 3484 2016-08-03 13:36:49Z emaste $");
 
 /* Backwards compatability for older FreeBSD releases. */
 #ifndef	STB_GNU_UNIQUE
@@ -440,6 +440,7 @@ elf_osabi(unsigned int abi)
 	case ELFOSABI_OPENVMS: return "OpenVMS";
 	case ELFOSABI_NSK: return "NSK";
 	case ELFOSABI_CLOUDABI: return "CloudABI";
+	case ELFOSABI_ARM_AEABI: return "ARM EABI";
 	case ELFOSABI_ARM: return "ARM";
 	case ELFOSABI_STANDALONE: return "StandAlone";
 	default:
@@ -2111,7 +2112,7 @@ dwarf_reg(unsigned int mach, unsigned int reg)
 static void
 dump_ehdr(struct readelf *re)
 {
-	size_t		 shnum, shstrndx;
+	size_t		 phnum, shnum, shstrndx;
 	int		 i;
 
 	printf("ELF Header:\n");
@@ -2173,7 +2174,13 @@ dump_ehdr(struct readelf *re)
 	    re->ehdr.e_phentsize);
 
 	/* e_phnum. */
-	printf("%-37s%u\n", "  Number of program headers:", re->ehdr.e_phnum);
+	printf("%-37s%u", "  Number of program headers:", re->ehdr.e_phnum);
+	if (re->ehdr.e_phnum == PN_XNUM) {
+		/* Extended program header numbering is in use. */
+		if (elf_getphnum(re->elf, &phnum))
+			printf(" (%zu)", phnum);
+	}
+	putchar('\n');
 
 	/* e_shentsize. */
 	printf("%-37s%u (bytes)\n", "  Size of section headers:",
@@ -2787,6 +2794,8 @@ dump_rel(struct readelf *re, struct section *s, Elf_Data *d)
 	const char *symname;
 	uint64_t symval;
 	int i, len;
+	uint32_t type;
+	uint8_t type2, type3;
 
 	if (s->link >= re->shnum)
 		return;
@@ -2796,8 +2805,8 @@ dump_rel(struct readelf *re, struct section *s, Elf_Data *d)
 		elftc_reloc_type_str(re->ehdr.e_machine,	    \
 		ELF32_R_TYPE(r.r_info)), (uintmax_t)symval, symname
 #define	REL_CT64 (uintmax_t)r.r_offset, (uintmax_t)r.r_info,	    \
-		elftc_reloc_type_str(re->ehdr.e_machine,	    \
-		ELF64_R_TYPE(r.r_info)), (uintmax_t)symval, symname
+		elftc_reloc_type_str(re->ehdr.e_machine, type),	    \
+		(uintmax_t)symval, symname
 
 	printf("\nRelocation section (%s):\n", s->name);
 	if (re->ec == ELFCLASS32)
@@ -2823,12 +2832,37 @@ dump_rel(struct readelf *re, struct section *s, Elf_Data *d)
 			    ELF64_R_TYPE(r.r_info));
 			printf("%8.8jx %8.8jx %-19.19s %8.8jx %s\n", REL_CT32);
 		} else {
+			type = ELF64_R_TYPE(r.r_info);
+			if (re->ehdr.e_machine == EM_MIPS) {
+				type2 = (type >> 8) & 0xFF;
+				type3 = (type >> 16) & 0xFF;
+				type = type & 0xFF;
+			} else {
+				type2 = type3 = 0;
+			}
 			if (re->options & RE_WW)
 				printf("%16.16jx %16.16jx %-24.24s"
 				    " %16.16jx %s\n", REL_CT64);
 			else
 				printf("%12.12jx %12.12jx %-19.19s"
 				    " %16.16jx %s\n", REL_CT64);
+			if (re->ehdr.e_machine == EM_MIPS) {
+				if (re->options & RE_WW) {
+					printf("%32s: %s\n", "Type2",
+					    elftc_reloc_type_str(EM_MIPS,
+					    type2));
+					printf("%32s: %s\n", "Type3",
+					    elftc_reloc_type_str(EM_MIPS,
+					    type3));
+				} else {
+					printf("%24s: %s\n", "Type2",
+					    elftc_reloc_type_str(EM_MIPS,
+					    type2));
+					printf("%24s: %s\n", "Type3",
+					    elftc_reloc_type_str(EM_MIPS,
+					    type3));
+				}
+			}
 		}
 	}
 
@@ -2843,6 +2877,8 @@ dump_rela(struct readelf *re, struct section *s, Elf_Data *d)
 	const char *symname;
 	uint64_t symval;
 	int i, len;
+	uint32_t type;
+	uint8_t type2, type3;
 
 	if (s->link >= re->shnum)
 		return;
@@ -2853,8 +2889,8 @@ dump_rela(struct readelf *re, struct section *s, Elf_Data *d)
 		elftc_reloc_type_str(re->ehdr.e_machine,	    \
 		ELF32_R_TYPE(r.r_info)), (uintmax_t)symval, symname
 #define	RELA_CT64 (uintmax_t)r.r_offset, (uintmax_t)r.r_info,	    \
-		elftc_reloc_type_str(re->ehdr.e_machine,	    \
-		ELF64_R_TYPE(r.r_info)), (uintmax_t)symval, symname
+		elftc_reloc_type_str(re->ehdr.e_machine, type),	    \
+		(uintmax_t)symval, symname
 
 	printf("\nRelocation section with addend (%s):\n", s->name);
 	if (re->ec == ELFCLASS32)
@@ -2881,6 +2917,14 @@ dump_rela(struct readelf *re, struct section *s, Elf_Data *d)
 			printf("%8.8jx %8.8jx %-19.19s %8.8jx %s", RELA_CT32);
 			printf(" + %x\n", (uint32_t) r.r_addend);
 		} else {
+			type = ELF64_R_TYPE(r.r_info);
+			if (re->ehdr.e_machine == EM_MIPS) {
+				type2 = (type >> 8) & 0xFF;
+				type3 = (type >> 16) & 0xFF;
+				type = type & 0xFF;
+			} else {
+				type2 = type3 = 0;
+			}
 			if (re->options & RE_WW)
 				printf("%16.16jx %16.16jx %-24.24s"
 				    " %16.16jx %s", RELA_CT64);
@@ -2888,6 +2932,23 @@ dump_rela(struct readelf *re, struct section *s, Elf_Data *d)
 				printf("%12.12jx %12.12jx %-19.19s"
 				    " %16.16jx %s", RELA_CT64);
 			printf(" + %jx\n", (uintmax_t) r.r_addend);
+			if (re->ehdr.e_machine == EM_MIPS) {
+				if (re->options & RE_WW) {
+					printf("%32s: %s\n", "Type2",
+					    elftc_reloc_type_str(EM_MIPS,
+					    type2));
+					printf("%32s: %s\n", "Type3",
+					    elftc_reloc_type_str(EM_MIPS,
+					    type3));
+				} else {
+					printf("%24s: %s\n", "Type2",
+					    elftc_reloc_type_str(EM_MIPS,
+					    type2));
+					printf("%24s: %s\n", "Type3",
+					    elftc_reloc_type_str(EM_MIPS,
+					    type3));
+				}
+			}
 		}
 	}
 
@@ -6496,13 +6557,14 @@ load_sections(struct readelf *re)
 		}
 		if ((name = elf_strptr(re->elf, shstrndx, sh.sh_name)) == NULL) {
 			(void) elf_errno();
-			name = "ERROR";
+			name = "<no-name>";
 		}
 		if ((ndx = elf_ndxscn(scn)) == SHN_UNDEF) {
-			if ((elferr = elf_errno()) != 0)
+			if ((elferr = elf_errno()) != 0) {
 				warnx("elf_ndxscn failed: %s",
 				    elf_errmsg(elferr));
-			continue;
+				continue;
+			}
 		}
 		if (ndx >= re->shnum) {
 			warnx("section index of '%s' out of range", name);

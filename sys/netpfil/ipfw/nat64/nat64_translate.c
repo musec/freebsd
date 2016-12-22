@@ -1256,9 +1256,9 @@ nat64_handle_icmp6(struct mbuf *m, int hlen, uint32_t aaddr, uint16_t aport,
 		 */
 		mtu -= sizeof(struct ip6_hdr) - sizeof(struct ip);
 		break;
-	case ICMP6_TIME_EXCEED_TRANSIT:
+	case ICMP6_TIME_EXCEEDED:
 		type = ICMP_TIMXCEED;
-		code = ICMP_TIMXCEED_INTRANS;
+		code = icmp6->icmp6_code;
 		break;
 	case ICMP6_PARAM_PROB:
 		switch (icmp6->icmp6_code) {
@@ -1415,8 +1415,7 @@ nat64_do_handle_ip6(struct mbuf *m, uint32_t aaddr, uint16_t aport,
 	struct sockaddr *dst;
 	uint16_t *csum;
 	uint32_t mtu;
-	int plen, hlen;
-	uint8_t proto;
+	int plen, hlen, proto;
 
 	/*
 	 * XXX: we expect ipfw_chk() did m_pullup() up to upper level

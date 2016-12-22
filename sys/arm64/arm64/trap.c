@@ -184,10 +184,13 @@ data_abort(struct trapframe *frame, uint64_t esr, uint64_t far, int lower)
 		map = &p->p_vmspace->vm_map;
 	else {
 		/* The top bit tells us which range to use */
-		if ((far >> 63) == 1)
+		if ((far >> 63) == 1) {
 			map = kernel_map;
-		else
+		} else {
 			map = &p->p_vmspace->vm_map;
+			if (map == NULL)
+				map = kernel_map;
+		}
 	}
 
 	if (pmap_fault(map->pmap, esr, far) == KERN_SUCCESS)
@@ -247,7 +250,7 @@ print_registers(struct trapframe *frame)
 {
 	u_int reg;
 
-	for (reg = 0; reg < 31; reg++) {
+	for (reg = 0; reg < nitems(frame->tf_x); reg++) {
 		printf(" %sx%d: %16lx\n", (reg < 10) ? " " : "", reg,
 		    frame->tf_x[reg]);
 	}
@@ -279,9 +282,18 @@ do_el1h_sync(struct trapframe *frame)
 	switch(exception) {
 	case EXCP_FP_SIMD:
 	case EXCP_TRAP_FP:
-		print_registers(frame);
-		printf(" esr:         %.8lx\n", esr);
-		panic("VFP exception in the kernel");
+#ifdef VFP
+		if ((curthread->td_pcb->pcb_fpflags & PCB_FP_KERN) != 0) {
+			vfp_restore_state();
+		} else
+#endif
+		{
+			print_registers(frame);
+			printf(" esr:         %.8lx\n", esr);
+			panic("VFP exception in the kernel");
+		}
+		break;
+	case EXCP_INSN_ABORT:
 	case EXCP_DATA_ABORT:
 		far = READ_SPECIALREG(far_el1);
 		intr_enable();
@@ -387,6 +399,10 @@ do_el0_sync(struct trapframe *frame)
 		call_trapsignal(td, SIGTRAP, TRAP_BRKPT, (void *)frame->tf_elr);
 		userret(td, frame);
 		break;
+	case EXCP_MSR:
+		call_trapsignal(td, SIGILL, ILL_PRVOPC, (void *)frame->tf_elr); 
+		userret(td, frame);
+		break;
 	case EXCP_SOFTSTP_EL0:
 		td->td_frame->tf_spsr &= ~PSR_SS;
 		td->td_pcb->pcb_flags &= ~PCB_SINGLE_STEP;
@@ -397,10 +413,16 @@ do_el0_sync(struct trapframe *frame)
 		userret(td, frame);
 		break;
 	default:
-		print_registers(frame);
-		panic("Unknown userland exception %x esr_el1 %lx\n", exception,
-		    esr);
+		call_trapsignal(td, SIGBUS, BUS_OBJERR, (void *)frame->tf_elr);
+		userret(td, frame);
+		break;
 	}
+
+	KASSERT((curthread->td_pcb->pcb_fpflags & ~PCB_FP_USERMASK) == 0,
+	    ("Kernel VFP flags set while entering userspace"));
+	KASSERT(
+	    curthread->td_pcb->pcb_fpusaved == &curthread->td_pcb->pcb_fpustate,
+	    ("Kernel VFP state in use when entering userspace"));
 }
 
 void

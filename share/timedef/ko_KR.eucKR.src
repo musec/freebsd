@@ -53,7 +53,7 @@
 %H시 %M분 %S초
 #
 # x_fmt
-%Y년 %b월 %e일
+%Y년 %_m월 %e일
 #
 # c_fmt
 %x %A %X

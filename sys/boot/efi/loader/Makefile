@@ -24,6 +24,10 @@ SRCS=	autoload.c \
 .if ${MK_ZFS} != "no"
 SRCS+=		zfs.c
 .PATH:		${.CURDIR}/../../zfs
+SRCS+=		skein.c skein_block.c
+# Do not unroll skein loops, reduce code size
+CFLAGS+=	-DSKEIN_LOOP=111
+.PATH:		${.CURDIR}/../../../crypto/skein
 
 # Disable warnings that are currently incompatible with the zfs boot code
 CWARNFLAGS.zfs.c+=	-Wno-sign-compare
@@ -53,6 +57,7 @@ CFLAGS+=	-I${.CURDIR}/../../i386/libi386
 .if ${MK_ZFS} != "no"
 CFLAGS+=	-I${.CURDIR}/../../zfs
 CFLAGS+=	-I${.CURDIR}/../../../cddl/boot/zfs
+CFLAGS+=	-I${.CURDIR}/../../../crypto/skein
 CFLAGS+=	-DEFI_ZFS_BOOT
 .endif
 CFLAGS+=	-DNO_PCI -DEFI
@@ -110,12 +115,9 @@ FILESMODE_loader.efi=	${BINMODE}
 LDSCRIPT=	${.CURDIR}/arch/${MACHINE}/ldscript.${MACHINE}
 LDFLAGS+=	-Wl,-T${LDSCRIPT} -Wl,-Bsymbolic -shared
 
-CLEANFILES+=	vers.c loader.efi
+CLEANFILES+=	loader.efi
 
 NEWVERSWHAT=	"EFI loader" ${MACHINE}
-
-vers.c:	${.CURDIR}/../../common/newvers.sh ${.CURDIR}/../../efi/loader/version
-	sh ${.CURDIR}/../../common/newvers.sh ${.CURDIR}/version ${NEWVERSWHAT}
 
 NM?=		nm
 OBJCOPY?=	objcopy
@@ -128,14 +130,19 @@ EFI_TARGET=	efi-app-ia32
 EFI_TARGET=	binary
 .endif
 
+# Arbitrarily set the PE/COFF header timestamps to 1 Jan 2016 00:00:00
+# for build reproducibility.
+SOURCE_DATE_EPOCH?=1451606400
 loader.efi: ${PROG}
 	if ${NM} ${.ALLSRC} | grep ' U '; then \
 		echo "Undefined symbols in ${.ALLSRC}"; \
 		exit 1; \
 	fi
+	SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} \
 	${OBJCOPY} -j .peheader -j .text -j .sdata -j .data \
 		-j .dynamic -j .dynsym -j .rel.dyn \
 		-j .rela.dyn -j .reloc -j .eh_frame -j set_Xcommand_set \
+		-j set_Xficl_compile_set \
 		--output-target=${EFI_TARGET} ${.ALLSRC} ${.TARGET}
 
 LIBEFI=		${.OBJDIR}/../libefi/libefi.a

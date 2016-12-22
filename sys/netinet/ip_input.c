@@ -550,24 +550,35 @@ tooshort:
 			m_adj(m, ip_len - m->m_pkthdr.len);
 	}
 
-	/* Try to forward the packet, but if we fail continue */
+	/*
+	 * Try to forward the packet, but if we fail continue.
+	 * ip_tryforward() does inbound and outbound packet firewall
+	 * processing. If firewall has decided that destination becomes
+	 * our local address, it sets M_FASTFWD_OURS flag. In this
+	 * case skip another inbound firewall processing and update
+	 * ip pointer.
+	 */
+	if (V_ipforwarding != 0
 #ifdef IPSEC
-	/* For now we do not handle IPSEC in tryforward. */
-	if (!key_havesp(IPSEC_DIR_INBOUND) && !key_havesp(IPSEC_DIR_OUTBOUND) &&
-	    (V_ipforwarding == 1))
-		if (ip_tryforward(m) == NULL)
+	    && !key_havesp(IPSEC_DIR_INBOUND)
+	    && !key_havesp(IPSEC_DIR_OUTBOUND)
+#endif
+	   ) {
+		if ((m = ip_tryforward(m)) == NULL)
 			return;
+		if (m->m_flags & M_FASTFWD_OURS) {
+			m->m_flags &= ~M_FASTFWD_OURS;
+			ip = mtod(m, struct ip *);
+			goto ours;
+		}
+	}
+#ifdef IPSEC
 	/*
 	 * Bypass packet filtering for packets previously handled by IPsec.
 	 */
 	if (ip_ipsec_filtertunnel(m))
 		goto passin;
-#else
-	if (V_ipforwarding == 1)
-		if (ip_tryforward(m) == NULL)
-			return;
-#endif /* IPSEC */
-
+#endif
 	/*
 	 * Run through list of hooks for input packets.
 	 *
@@ -1000,7 +1011,7 @@ ip_forward(struct mbuf *m, int srcrt)
 	 * because unnecessary, or because rate limited), so we are
 	 * really we are wasting a lot of work here.
 	 *
-	 * We don't use m_copy() because it might return a reference
+	 * We don't use m_copym() because it might return a reference
 	 * to a shared cluster. Both this function and ip_output()
 	 * assume exclusive access to the IP header in `m', so any
 	 * data in a cluster may change before we reach icmp_error().

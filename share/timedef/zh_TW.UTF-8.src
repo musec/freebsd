@@ -63,7 +63,7 @@
 下午
 #
 # date_fmt
-%Y年%b月%e日 %A %X %Z
+%Y年%_m月%e日 %A %X %Z
 #
 # Long month names (without case ending)
 1月
